@@ -7,42 +7,23 @@ def multi_head_attention(Q: np.ndarray, K: np.ndarray, V: np.ndarray,
     """
     Returns projected multi-head attention outputs.
     """
-    batch_size, seq_len, d_model = Q.shape
+    B, S_q, d_model = Q.shape
+    S_k = K.shape[1]
     d_k = d_model // num_heads
 
-    Q = torch.as_tensor(Q, dtype=torch.float32)
-    K = torch.as_tensor(K, dtype=torch.float32)
-    V = torch.as_tensor(V, dtype=torch.float32)
-    
-    W_q = torch.as_tensor(W_q, dtype=torch.float32)
-    W_k = torch.as_tensor(W_k, dtype=torch.float32)
-    W_v = torch.as_tensor(W_v, dtype=torch.float32)
-    W_o = torch.as_tensor(W_o, dtype=torch.float32)
+    Q, K, V, W_q, W_k, W_v, W_o = (torch.as_tensor(x, dtype=torch.float32)
+                                   for x in (Q, K, V, W_q, W_k, W_v, W_o))
 
-    q_w = torch.matmul(Q, W_q)
-    k_w = torch.matmul(K, W_k)
-    v_w = torch.matmul(V, W_v)
+    with torch.no_grad():
+        q = (Q @ W_q).reshape(B, S_q, num_heads, d_k).transpose(1, 2)
+        k = (K @ W_k).reshape(B, S_k, num_heads, d_k).transpose(1, 2)
+        v = (V @ W_v).reshape(B, S_k, num_heads, d_k).transpose(1, 2)
 
-    q = q_w.reshape(batch_size, seq_len, num_heads, d_k)
-    k = k_w.reshape(batch_size, seq_len, num_heads, d_k)
-    v = v_w.reshape(batch_size, seq_len, num_heads, d_k)
+        scores = (q @ k.transpose(2, 3)) / d_k ** 0.5
+        weights = torch.softmax(scores, dim=-1)
 
-    q = q.transpose(1, 2)
-    k = k.transpose(1, 2)
-    v = v.transpose(1, 2)
+        out = weights @ v                                  # (B, H, S_q, d_k)
+        out = out.transpose(1, 2).reshape(B, S_q, d_model)
+        out = out @ W_o
 
-    k_t = k.transpose(2, 3)
-
-    q_k_t = torch.matmul(q, k_t)
-    scores = q_k_t / np.sqrt(d_k)
-
-    scores = torch.softmax(scores, dim=-1)
-
-    attention = torch.matmul(scores, v)
-
-    attention = attention.transpose(1, 2)
-    attention = attention.reshape(batch_size, seq_len, d_model)
-
-    output = torch.matmul(attention, W_o)
-
-    return output.numpy()
+    return out.numpy()
